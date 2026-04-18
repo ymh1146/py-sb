@@ -352,14 +352,27 @@ class SingBox:
     def start(self) -> bool:
         """启动sing-box"""
         cmd = [str(self.sb_binary), "run", "-c", str(self.config_path)]
+        logger.debug(f"[SING-BOX] 命令: {' '.join(cmd)}")
+        
+        # 检查文件是否存在
+        if not self.config_path.exists():
+            logger.error(f"[SING-BOX] 配置文件不存在: {self.config_path}")
+            return False
+            
         self.process = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
         )
-        time.sleep(2)
+        time.sleep(3)
 
         if self.process.poll() is not None:
+            stdout, stderr = self.process.communicate(timeout=5)
+            if stdout:
+                logger.error(f"[SING-BOX] stdout: {stdout.strip()}")
+            if stderr:
+                logger.error(f"[SING-BOX] stderr: {stderr.strip()}")
             logger.error("[SING-BOX] 启动失败")
             return False
         logger.info(f"[SING-BOX] 已启动 PID: {self.process.pid}")
@@ -396,26 +409,6 @@ class ConfigGenerator:
     def generate(self) -> dict:
         """生成sing-box配置"""
         inbounds = []
-
-        # Reality (TCP)
-        if self.private_key:
-            inbounds.append({
-                "type": "vless",
-                "tag": "vless-reality-in",
-                "listen": "::",
-                "listen_port": 443,
-                "users": [{"uuid": self.uuid, "flow": "xtls-rprx-vision"}],
-                "tls": {
-                    "enabled": True,
-                    "server_name": "www.nazhumi.com",
-                    "reality": {
-                        "enabled": True,
-                        "handshake": {"server": "www.nazhumi.com", "server_port": 443},
-                        "private_key": self.private_key,
-                        "short_id": [""]
-                    }
-                }
-            })
 
         # Trojan
         if self.trojan_port:
@@ -471,7 +464,6 @@ class SubGenerator:
                  isp: str = "Node"):
         self.uuid = uuid_str
         self.public_ip = public_ip
-        self.private_key = private_key
         self.trojan_port = trojan_port
         self.argo_domain = argo_domain
         self.cf_domain = cf_domain
@@ -480,11 +472,6 @@ class SubGenerator:
     def generate_sub(self) -> str:
         """生成订阅内容"""
         lines = []
-
-        # VLESS Reality
-        if self.private_key:
-            line = f"vless://{self.uuid}@{self.public_ip}:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.nazhumi.com&fp=chrome&pbk={self.private_key}&type=tcp#VLESS-{self.isp}"
-            lines.append(line)
 
         # Trojan
         if self.trojan_port:
@@ -500,18 +487,14 @@ class SubGenerator:
 
     def generate_html(self, sub_url: str) -> str:
         """生成HTML页面"""
-        vless_link = ""
         trojan_link = ""
         argo_link = ""
 
-        if self.private_key:
-            vless_link = f"vless://{self.uuid}@{self.public_ip}:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.nazhumi.com&fp=chrome&pbk={self.private_key}&type=tcp#VLESS-{self.isp}"
         if self.trojan_port:
             trojan_link = f"trojan://{self.uuid}@{self.public_ip}:{self.trojan_port}?security=tls&sni=www.bing.com&allowInsecure=1#Trojan-{self.isp}"
         if self.argo_domain:
             argo_link = f"vless://{self.uuid}@{self.cf_domain}:443?encryption=none&security=tls&sni={self.argo_domain}&type=ws&host={self.argo_domain}&path=%2F{self.uuid}-vless#Argo-{self.isp}"
 
-        vless_html = f'<div class="link"><h3>VLESS</h3><code>{vless_link}</code><button onclick="copyText(\'{vless_link}\')">复制</button></div>' if vless_link else ""
         trojan_html = f'<div class="link"><h3>Trojan</h3><code>{trojan_link}</code><button onclick="copyText(\'{trojan_link}\')">复制</button></div>' if trojan_link else ""
         argo_html = f'<div class="link"><h3>Argo (WS)</h3><code>{argo_link}</code><button onclick="copyText(\'{argo_link}\')">复制</button></div>' if argo_link else ""
 
@@ -525,7 +508,7 @@ class SubGenerator:
 body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #1a1a2e; color: #eee; }}
 h1 {{ color: #e94560; text-align: center; }}
 .link {{ background: #16213e; padding: 15px; margin: 15px 0; border-radius: 8px; }}
-.link h3 {{ margin-top: 0; color: #0f3460; }}
+.link h3 {{ margin-top: 0; color: #fff; }}
 code {{ display: block; word-break: break-all; background: #0a0a1a; padding: 10px; border-radius: 4px; font-size: 12px; margin: 10px 0; }}
 button {{ background: #e94560; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; }}
 button:hover {{ background: #c13651; }}
@@ -539,7 +522,6 @@ button:hover {{ background: #c13651; }}
 <p>ISP: {self.isp}</p>
 <p>UUID: {self.uuid}</p>
 </div>
-{vless_html}
 {trojan_html}
 {argo_html}
 <div class="link">
@@ -682,29 +664,7 @@ class SingboxNode:
             logger.error("[下载] cloudflared 多次失败")
             sys.exit(1)
 
-        # 7. Reality密钥
-        logger.info("[密钥] 检查中...")
-        key_file = self.file_path / "key.txt"
-        if key_file.exists():
-            content = key_file.read_text(encoding='utf-8')
-            priv_match = re.search(r'PrivateKey:\s*(\S+)', content)
-            pub_match = re.search(r'PublicKey:\s*(\S+)', content)
-            self.private_key = priv_match.group(1) if priv_match else None
-            self.public_key = pub_match.group(1) if pub_match else None
-        else:
-            try:
-                result = subprocess.run([str(self.sb_binary), "generate", "reality-keypair"],
-                                        capture_output=True, text=True, timeout=10)
-                if result.returncode == 0 and result.stdout:
-                    output = result.stdout.strip()
-                    key_file.write_text(output, encoding='utf-8')
-                    priv_match = re.search(r'PrivateKey:\s*(\S+)', output)
-                    pub_match = re.search(r'PublicKey:\s*(\S+)', output)
-                    self.private_key = priv_match.group(1) if priv_match else None
-                    self.public_key = pub_match.group(1) if pub_match else None
-            except Exception as e:
-                logger.warning(f"[密钥] 生成失败: {e}")
-        logger.info("[密钥] 已就绪")
+
 
         # 8. 证书
         logger.info("[证书] 生成中...")
@@ -727,8 +687,7 @@ class SingboxNode:
         config_gen = ConfigGenerator(
             self.file_path,
             self.uuid,
-            self.private_key,
-            self.trojan_port,
+            trojan_port=self.trojan_port,
             argo_port=8081
         )
         config_gen.save(config_path)
@@ -753,11 +712,10 @@ class SingboxNode:
         sub_gen = SubGenerator(
             self.uuid,
             self.public_ip,
-            self.private_key,
-            self.trojan_port,
-            self.argo_domain,
-            self.best_cf_domain,
-            self.isp
+            trojan_port=self.trojan_port,
+            argo_domain=self.argo_domain,
+            cf_domain=self.best_cf_domain,
+            isp=self.isp
         )
         sub_content = sub_gen.generate_sub()
         sub_url = f"http://{self.public_ip}:{self.http_port}"
@@ -777,8 +735,6 @@ class SingboxNode:
         logger.info("=" * 60)
         logger.info("")
         logger.info("代理节点:")
-        if self.private_key:
-            logger.info(f"  - VLESS (Reality): {self.public_ip}:443")
         if self.trojan_port:
             logger.info(f"  - Trojan (TLS): {self.public_ip}:{self.trojan_port}")
         if self.argo_domain:
