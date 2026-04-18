@@ -55,8 +55,8 @@ def detect_ports() -> list[int]:
         logger.info(f"[端口] 命令行参数 = {cli_ports}")
         return cli_ports
 
-    fallback_ports = [8080]
-    logger.warning(f"[端口] 未检测到端口，默认使用 {fallback_ports}")
+    fallback_ports = [443, 80, 8080, 3000, 5000]
+    logger.warning(f"[端口] 未检测到端口，按顺序尝试 {fallback_ports}")
     return fallback_ports
 
 
@@ -147,13 +147,15 @@ def build_response(request_line: str, headers: dict[str, str], bind_port: int, c
     )
 
 
-def serve_on_port(port: int) -> None:
+def serve(port: int) -> None:
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("0.0.0.0", port))
     server.listen(128)
 
     logger.info(f"[HTTP] 调试服务已启动 0.0.0.0:{port}")
+    logger.info(f"[提示] 用系统域名访问: https://你的域名/")
+    logger.info(f"[提示] 用系统域名访问: https://你的域名/sub")
     logger.info(f"[提示] 容器内自测: http://127.0.0.1:{port}/sub?ping=1")
 
     while True:
@@ -192,27 +194,24 @@ def main() -> None:
     ports = detect_ports()
     logger.info(f"[启动] 可用端口 {ports}")
 
-    primary_port = ports[0]
-    ok, message = can_bind(primary_port)
-    if not ok:
-        logger.error(f"[启动] 端口 {primary_port} 不可用: {message}")
-        sys.exit(1)
+    primary_port = None
+    for port in ports:
+        ok, message = can_bind(port)
+        if ok:
+            primary_port = port
+            logger.info(f"[启动] 选择端口 {primary_port}")
+            break
+        logger.warning(f"[端口] {port} 不可用: {message}")
 
-    logger.info(f"[启动] 使用端口 {primary_port}")
-
-    if not ports:
+    if primary_port is None:
         logger.error("[启动] 没有可绑定的端口")
         sys.exit(1)
 
-    logger.info(f"[提示] 用系统域名访问: https://你的域名/")
-    logger.info(f"[提示] 用系统域名访问: https://你的域名/sub")
-    logger.info(f"[提示] 当前监听端口: {primary_port}")
+    unused_ports = [port for port in ports if port != primary_port]
+    if unused_ports:
+        logger.info(f"[启动] 未使用的候选端口 {unused_ports}")
 
-    thread = threading.Thread(target=serve_on_port, args=(primary_port,), daemon=True)
-    thread.start()
-
-    while True:
-        time.sleep(60)
+    serve(primary_port)
 
 
 if __name__ == "__main__":
