@@ -624,11 +624,8 @@ class SingboxNode:
             if ports_str:
                 return [int(p) for p in ports_str.replace(',', ' ').split() if p.isdigit()]
 
-        logger.error("[端口] 未找到端口配置，请使用以下方式之一:")
-        logger.error("  1. 环境变量: export PORTS_STRING='30001 30002'")
-        logger.error("  2. 命令行: python start.py -p 30001 30002")
-        logger.error("  3. 配置文件: echo '30001 30002' > ports.txt")
-        return []
+        logger.warning("[端口] 未检测到端口配置，使用默认端口 5000...")
+        return [5000]
 
     def run(self) -> None:
         """运行主程序"""
