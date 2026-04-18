@@ -399,11 +399,13 @@ class ConfigGenerator:
     def __init__(self, file_path: Path, uuid_str: str, 
                  private_key: Optional[str] = None,
                  trojan_port: Optional[int] = None,
+                 trojan_fallback_port: Optional[int] = None,
                  argo_port: int = 8081):
         self.file_path = file_path
         self.uuid = uuid_str
         self.private_key = private_key
         self.trojan_port = trojan_port
+        self.trojan_fallback_port = trojan_fallback_port
         self.argo_port = argo_port
 
     def generate(self) -> dict:
@@ -412,7 +414,7 @@ class ConfigGenerator:
 
         # Trojan
         if self.trojan_port:
-            inbounds.append({
+            trojan_inbound = {
                 "type": "trojan",
                 "tag": "trojan-in",
                 "listen": "::",
@@ -423,7 +425,13 @@ class ConfigGenerator:
                     "certificate_path": str(self.file_path / "cert.pem"),
                     "key_path": str(self.file_path / "private.key")
                 }
-            })
+            }
+            if self.trojan_fallback_port:
+                trojan_inbound["fallback"] = {
+                    "server": "127.0.0.1",
+                    "server_port": self.trojan_fallback_port
+                }
+            inbounds.append(trojan_inbound)
 
         # VLESS for Argo
         inbounds.append({
@@ -558,6 +566,7 @@ class SingboxNode:
         self.argo_domain: str = ""
         self.http_port: int = 0
         self.trojan_port: Optional[int] = None
+        self.public_sub_url: str = ""
         self._shutdown_event = False
 
         self.sb_binary: Optional[Path] = None
@@ -634,12 +643,17 @@ class SingboxNode:
         logger.info(f"[端口] 发现 {len(available_ports)} 个: {available_ports}")
 
         # 4. 端口分配
-        self.http_port = available_ports[0]
+        # 平台域名通常只映射第一个端口，因此 Trojan 固定使用第一个端口
+        # HTTP 订阅服务使用第二个端口；若没有第二个端口，则放到内部端口并通过 Trojan fallback 暴露
+        self.trojan_port = available_ports[0]
         if len(available_ports) >= 2:
-            self.trojan_port = available_ports[1]
+            self.http_port = available_ports[1]
+            logger.info(f"[端口] Trojan 端口: {self.trojan_port}, HTTP订阅端口: {self.http_port}")
         else:
-            self.trojan_port = None
-            logger.warning("[端口] 仅有一个端口，Trojan 入站已禁用（避免与订阅服务冲突）")
+            self.http_port = 18080
+            logger.warning(
+                f"[端口] 仅有一个对外端口 {self.trojan_port}，HTTP订阅服务改为内部端口 {self.http_port}，通过Trojan fallback对外提供"
+            )
 
         # 5. UUID
         uuid_file = self.file_path / "uuid.txt"
@@ -692,6 +706,7 @@ class SingboxNode:
             self.file_path,
             self.uuid,
             trojan_port=self.trojan_port,
+            trojan_fallback_port=self.http_port,
             argo_port=8081
         )
         config_gen.save(config_path)
@@ -722,7 +737,8 @@ class SingboxNode:
             isp=self.isp
         )
         sub_content = sub_gen.generate_sub()
-        sub_url = f"http://{self.public_ip}:{self.http_port}"
+        self.public_sub_url = f"https://{self.public_ip}:{self.trojan_port}"
+        sub_url = self.public_sub_url
         html_content = sub_gen.generate_html(sub_url)
 
         self.sub_server.update_content(sub_content, html_content)
@@ -746,6 +762,8 @@ class SingboxNode:
         logger.info("")
         logger.info(f"订阅链接: {sub_url}/sub")
         logger.info(f"Web页面:  {sub_url}/")
+        if self.http_port != self.trojan_port:
+            logger.info(f"内部HTTP订阅服务: http://127.0.0.1:{self.http_port}/sub")
         logger.info("=" * 60)
         logger.info("")
 
