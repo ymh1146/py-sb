@@ -712,8 +712,31 @@ class SingboxNode:
         self.cleanup()
         sys.exit(0)
     def get_available_ports(self) -> List[int]:
-        """获取可用端口"""
-        ports_str = os.environ.get("PORTS_STRING", "")
+        """获取可用端口 - 支持多种环境变量格式"""
+        port_env_vars = [
+            "PORTS_STRING",
+            "PORT",
+            "PORTS",
+            "EASYPANEL_PORT",
+            "EASYPANEL_PORTS",
+        ]
+
+        ports_str = ""
+        detected_var = ""
+
+        for var in port_env_vars:
+            ports_str = os.environ.get(var, "")
+            if ports_str:
+                detected_var = var
+                logger.info(f"[端口] 检测到环境变量 {var}: {ports_str}")
+                break
+
+        if not ports_str:
+            logger.warning("[端口] 未找到常用端口环境变量，打印所有环境变量供调试:")
+            for key, val in sorted(os.environ.items()):
+                if any(x in key.upper() for x in ['PORT', 'EASY', 'PANEL', 'SERVER', 'APP']):
+                    logger.warning(f"  - {key} = {val}")
+
         if not ports_str:
             return []
         return [int(p) for p in ports_str.split() if p.isdigit()]
