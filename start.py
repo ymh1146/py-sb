@@ -312,7 +312,7 @@ class SubServer:
         self.bind = bind
         self.server = None
         self._running = False
-    
+
     def handle_request(self, client_socket, client_address):
         """处理HTTP请求"""
         try:
@@ -320,14 +320,14 @@ class SubServer:
             if not request:
                 client_socket.close()
                 return
-            
-            # 简单解析请求
+
             lines = request.split('\r\n')
             if not lines:
                 client_socket.close()
                 return
-            
+
             request_line = lines[0]
+
             if '/sub' in request_line or '/uuid' in request_line:
                 response = f"HTTP/1.1 200 OK\r\n"
                 response += "Content-Type: text/plain; charset=utf-8\r\n"
@@ -335,12 +335,22 @@ class SubServer:
                 response += f"Content-Length: {len(self.sub_content)}\r\n"
                 response += "\r\n"
                 response += self.sub_content
-            else:
-                response = "HTTP/1.1 404 Not Found\r\n"
+            elif request_line.startswith("GET / ") or request_line == "GET / HTTP/1.1" or "GET / HTTP" in request_line:
+                ok_content = "Sing-box Node is running. Subscribe at /sub or /{uuid}"
+                response = f"HTTP/1.1 200 OK\r\n"
+                response += "Content-Type: text/plain; charset=utf-8\r\n"
                 response += "Connection: close\r\n"
-                response += "Content-Length: 0\r\n"
+                response += f"Content-Length: {len(ok_content)}\r\n"
                 response += "\r\n"
-            
+                response += ok_content
+            else:
+                response = "HTTP/1.1 200 OK\r\n"
+                response += "Content-Type: text/plain; charset=utf-8\r\n"
+                response += "Connection: close\r\n"
+                response += "Content-Length: 2\r\n"
+                response += "\r\n"
+                response += "OK"
+
             client_socket.sendall(response.encode('utf-8'))
         except Exception:
             pass
