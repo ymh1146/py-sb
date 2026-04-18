@@ -734,8 +734,7 @@ class SingboxNode:
         if not ports_str:
             logger.warning("[端口] 未找到常用端口环境变量，打印所有环境变量供调试:")
             for key, val in sorted(os.environ.items()):
-                if any(x in key.upper() for x in ['PORT', 'EASY', 'PANEL', 'SERVER', 'APP']):
-                    logger.warning(f"  - {key} = {val}")
+                logger.warning(f"  {key} = {val}")
 
         if not ports_str:
             return []
