@@ -55,8 +55,8 @@ def detect_ports() -> list[int]:
         logger.info(f"[端口] 命令行参数 = {cli_ports}")
         return cli_ports
 
-    fallback_ports = [443, 80, 8080, 3000, 5000]
-    logger.warning(f"[端口] 未检测到端口，按顺序尝试 {fallback_ports}")
+    fallback_ports = [8080]
+    logger.warning(f"[端口] 未检测到端口，默认使用 {fallback_ports}")
     return fallback_ports
 
 
@@ -192,26 +192,24 @@ def main() -> None:
     ports = detect_ports()
     logger.info(f"[启动] 可用端口 {ports}")
 
-    selected_ports = []
-    for port in ports:
-        ok, message = can_bind(port)
-        if ok:
-            selected_ports.append(port)
-            logger.info(f"[启动] 可监听端口 {port}")
-        else:
-            logger.warning(f"[端口] {port} 不可用: {message}")
+    primary_port = ports[0]
+    ok, message = can_bind(primary_port)
+    if not ok:
+        logger.error(f"[启动] 端口 {primary_port} 不可用: {message}")
+        sys.exit(1)
 
-    if not selected_ports:
+    logger.info(f"[启动] 使用端口 {primary_port}")
+
+    if not ports:
         logger.error("[启动] 没有可绑定的端口")
         sys.exit(1)
 
     logger.info(f"[提示] 用系统域名访问: https://你的域名/")
     logger.info(f"[提示] 用系统域名访问: https://你的域名/sub")
-    logger.info(f"[提示] 当前同时监听端口: {selected_ports}")
+    logger.info(f"[提示] 当前监听端口: {primary_port}")
 
-    for port in selected_ports:
-        thread = threading.Thread(target=serve_on_port, args=(port,), daemon=True)
-        thread.start()
+    thread = threading.Thread(target=serve_on_port, args=(primary_port,), daemon=True)
+    thread.start()
 
     while True:
         time.sleep(60)
