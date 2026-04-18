@@ -635,7 +635,11 @@ class SingboxNode:
 
         # 4. 端口分配
         self.http_port = available_ports[0]
-        self.trojan_port = available_ports[0] if len(available_ports) == 1 else available_ports[1]
+        if len(available_ports) >= 2:
+            self.trojan_port = available_ports[1]
+        else:
+            self.trojan_port = None
+            logger.warning("[端口] 仅有一个端口，Trojan 入站已禁用（避免与订阅服务冲突）")
 
         # 5. UUID
         uuid_file = self.file_path / "uuid.txt"
