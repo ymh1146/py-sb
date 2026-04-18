@@ -712,33 +712,90 @@ class SingboxNode:
         self.cleanup()
         sys.exit(0)
     def get_available_ports(self) -> List[int]:
-        """获取可用端口 - 支持多种环境变量格式"""
+        """获取可用端口 - 支持多种方式"""
+        port_sources = []
+
         port_env_vars = [
             "PORTS_STRING",
             "PORT",
             "PORTS",
             "EASYPANEL_PORT",
             "EASYPANEL_PORTS",
+            "MANGO_PORT",
+            "APP_PORT",
+            "INTERNAL_PORT",
         ]
-
-        ports_str = ""
-        detected_var = ""
 
         for var in port_env_vars:
             ports_str = os.environ.get(var, "")
             if ports_str:
-                detected_var = var
                 logger.info(f"[端口] 检测到环境变量 {var}: {ports_str}")
-                break
+                port_sources.append(('env', var, ports_str))
 
-        if not ports_str:
-            logger.warning("[端口] 未找到常用端口环境变量，打印所有环境变量供调试:")
-            for key, val in sorted(os.environ.items()):
-                logger.warning(f"  {key} = {val}")
+        import argparse
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument('-p', '--port', '--ports', dest='ports', type=str, default='')
+        parser.add_argument('-h', '--help', action='store_true')
+        try:
+            args, _ = parser.parse_known_args(sys.argv[1:])
+            if args.ports:
+                logger.info(f"[端口] 检测到命令行参数: {args.ports}")
+                port_sources.append(('arg', 'command line', args.ports))
+            if args.help:
+                logger.info("用法: python start.py -p 30001 30002 或 --ports 30001,30002,30003")
+        except Exception:
+            pass
 
-        if not ports_str:
+        config_file = self.script_dir / "ports.txt"
+        if config_file.exists():
+            ports_str = config_file.read_text(encoding='utf-8').strip()
+            if ports_str:
+                logger.info(f"[端口] 检测到配置文件: {ports_str}")
+                port_sources.append(('file', str(config_file), ports_str))
+
+        if not port_sources:
+            logger.error("[端口] 未找到端口配置，请使用以下方式之一:")
+            logger.error("  1. 环境变量: export PORTS_STRING='30001 30002'")
+            logger.error("  2. 命令行: python start.py -p 30001 30002")
+            logger.error("  3. 配置文件: echo '30001 30002' > ports.txt")
             return []
-        return [int(p) for p in ports_str.split() if p.isdigit()]
+
+        _, _, ports_str = port_sources[-1]
+        return [int(p) for p in ports_str.replace(',', ' ').split() if p.isdigit()]
+
+    def get_public_url(self) -> Optional[str]:
+        """尝试获取公开访问URL"""
+        url_vars = [
+            "PUBLIC_URL",
+            "APP_URL",
+            "APP_DOMAIN",
+            "URL",
+            "MANGO_URL",
+            "SERVICE_URL",
+        ]
+
+        for var in url_vars:
+            url = os.environ.get(var, "")
+            if url:
+                logger.info(f"[URL] 检测到: {var} = {url}")
+                return url.rstrip('/')
+
+        return None
+
+    def get_app_name(self) -> Optional[str]:
+        """从HOSTNAME或域名推断应用名称"""
+        hostname = os.environ.get("HOSTNAME", "")
+        if hostname and 'mangoi' in os.environ.get("HOSTNAME", "").lower():
+            pass
+
+        known_domains = [
+            ("mangoi.in", "Mango"),
+        ]
+        for domain, platform in known_domains:
+            if hostname and domain in hostname:
+                return hostname.split('.')[0]
+
+        return None
     
     def run(self) -> None:
         """运行主程序"""
@@ -896,7 +953,12 @@ class SingboxNode:
         self.sub_server.update_content(sub_gen.generate())
 
         # 15. 打印结果
-        sub_url = f"http://{self.public_ip}:{http_port}/sub"
+        public_url = self.get_public_url()
+        if public_url:
+            sub_url = f"{public_url}/sub"
+        else:
+            sub_url = f"http://{self.public_ip}:{http_port}/sub"
+
         logger.info("")
         logger.info("=" * 50)
         if self.single_port_mode:
@@ -920,7 +982,10 @@ class SingboxNode:
                 logger.info(f"  - Argo (WS): {self.argo_domain}")
 
         logger.info("")
-        logger.info(f"订阅链接: {sub_url}")
+        if public_url:
+            logger.info(f"订阅链接: {sub_url} (通过 {public_url})")
+        else:
+            logger.info(f"订阅链接: {sub_url}")
         logger.info("=" * 50)
         logger.info("")
 
