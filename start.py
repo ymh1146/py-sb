@@ -147,15 +147,13 @@ def build_response(request_line: str, headers: dict[str, str], bind_port: int, c
     )
 
 
-def serve(port: int) -> None:
+def serve_on_port(port: int) -> None:
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("0.0.0.0", port))
     server.listen(128)
 
     logger.info(f"[HTTP] 调试服务已启动 0.0.0.0:{port}")
-    logger.info(f"[提示] 用系统域名访问: https://你的域名/")
-    logger.info(f"[提示] 用系统域名访问: https://你的域名/sub")
     logger.info(f"[提示] 容器内自测: http://127.0.0.1:{port}/sub?ping=1")
 
     while True:
@@ -194,24 +192,29 @@ def main() -> None:
     ports = detect_ports()
     logger.info(f"[启动] 可用端口 {ports}")
 
-    primary_port = None
+    selected_ports = []
     for port in ports:
         ok, message = can_bind(port)
         if ok:
-            primary_port = port
-            logger.info(f"[启动] 选择端口 {primary_port}")
-            break
-        logger.warning(f"[端口] {port} 不可用: {message}")
+            selected_ports.append(port)
+            logger.info(f"[启动] 可监听端口 {port}")
+        else:
+            logger.warning(f"[端口] {port} 不可用: {message}")
 
-    if primary_port is None:
+    if not selected_ports:
         logger.error("[启动] 没有可绑定的端口")
         sys.exit(1)
 
-    unused_ports = [port for port in ports if port != primary_port]
-    if unused_ports:
-        logger.info(f"[启动] 未使用的候选端口 {unused_ports}")
+    logger.info(f"[提示] 用系统域名访问: https://你的域名/")
+    logger.info(f"[提示] 用系统域名访问: https://你的域名/sub")
+    logger.info(f"[提示] 当前同时监听端口: {selected_ports}")
 
-    serve(primary_port)
+    for port in selected_ports:
+        thread = threading.Thread(target=serve_on_port, args=(port,), daemon=True)
+        thread.start()
+
+    while True:
+        time.sleep(60)
 
 
 if __name__ == "__main__":
